@@ -21,8 +21,7 @@
     "@fontsource/outfit": "^5.3.0",
     "@lichess-org/chessground": "10.1.1",
     "chess.js": "1.4.0",
-    "howler": "2.2.4",
-    "mespeak": "2.0.2"
+    "howler": "2.2.4"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

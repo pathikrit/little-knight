@@ -1,5 +1,6 @@
 import { Howl, Howler } from 'howler';
 import type { Settings } from './settings';
+import { voices, type VoiceId } from './voices';
 
 // Original synthesized sounds, distributed with the app under GPL-3.0-or-later.
 // Howler handles playback, pooling, and mobile audio unlocking.
@@ -29,44 +30,45 @@ export function playSound(style: Settings['sound']) {
   } catch { /* Sound is optional. */ }
 }
 
-let voice: typeof import('mespeak')['default'] | undefined;
-let loading: Promise<void> | undefined;
+let voice: Howl | undefined;
 let speechId = 0;
-let spoken: Howl | undefined;
 let speechQueue = Promise.resolve();
 let finishSpeech: (() => void) | undefined;
+const voiceAsset = (path: string) => new URL(path, new URL(import.meta.env.BASE_URL, document.baseURI)).href;
+
 export function warmAudio() {
   try { void Howler.ctx?.resume(); } catch { /* Optional audio. */ }
-  loading ??= Promise.all([import('mespeak'), import('mespeak/src/mespeak_config.json'), import('mespeak/voices/en/en-us.json')])
-    .then(([module, config, english]) => {
-      voice = module.default; voice.loadConfig(config.default); voice.loadVoice(english.default);
-    }).catch(() => { /* Text hints remain available if speech cannot load. */ });
+  if (voice) return;
+  const first = Object.values(voices)[0].audio;
+  const sprite: Record<string, [number, number]> = Object.fromEntries(Object.entries(voices).map(([id, line]) =>
+    [id, [line.audio.start, line.audio.duration] as [number, number]]));
+  voice = new Howl({ src: [voiceAsset(first.file)], format: ['mp3'], sprite, volume: .85, preload: true });
 }
 export function stopSpeech() {
-  speechId++; spoken?.unload(); spoken = undefined;
+  speechId++; voice?.stop();
   finishSpeech?.(); finishSpeech = undefined; speechQueue = Promise.resolve();
 }
-export function speak(message: string, queue = false) {
+export function speak(message: VoiceId | readonly VoiceId[], queue = false) {
   if (!queue) stopSpeech();
   const id = speechId;
-  speechQueue = speechQueue.then(() => say(message, id));
+  const lines = typeof message === 'string' ? [message] : message;
+  speechQueue = speechQueue.then(async () => {
+    for (const line of lines) await say(line, id);
+  });
   return speechQueue;
 }
-async function say(message: string, id: number) {
+async function say(line: VoiceId, id: number) {
   if (id !== speechId) return;
   warmAudio();
-  await loading;
   if (id !== speechId || !voice) return;
   try {
-    const data = voice.speak(message, { rawdata: 'data-url', speed: 145, pitch: 55 });
-    if (typeof data === 'string') {
-      await new Promise<void>(resolve => {
-        const finish = () => { if (finishSpeech === finish) finishSpeech = undefined; resolve(); };
-        finishSpeech = finish;
-        spoken?.unload();
-        spoken = new Howl({ src: [data], format: ['wav'], volume: .85, onend: finish, onloaderror: finish, onplayerror: finish });
-        spoken.play();
-      });
-    }
+    await new Promise<void>(resolve => {
+      const finish = () => { if (finishSpeech === finish) finishSpeech = undefined; resolve(); };
+      finishSpeech = finish;
+      const soundId = voice!.play(line);
+      voice!.once('end', finish, soundId);
+      voice!.once('loaderror', finish, soundId);
+      voice!.once('playerror', finish, soundId);
+    });
   } catch { /* Text hints remain available if speech fails. */ }
 }

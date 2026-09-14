@@ -5,7 +5,7 @@ import { beginnerRules, findFreeCapture } from '../../src/game';
 it('finds a free rook for White and preserves the position', () => {
   const chess = new Chess('k7/8/8/8/4r3/8/4R3/K7 w - - 0 1');
   const before = chess.fen();
-  expect(findFreeCapture(chess, beginnerRules)).toEqual({ from: 'e2', to: 'e4', message: 'I think you can capture this rook for free.' });
+  expect(findFreeCapture(chess, beginnerRules)).toEqual({ from: 'e2', to: 'e4', voice: 'capture-rook-free', exposedVoice: undefined });
   expect(chess.fen()).toBe(before);
   expect(chess.history()).toEqual([]);
 });

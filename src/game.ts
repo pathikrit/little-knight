@@ -1,10 +1,11 @@
 import { Chess, type Color, type Move, type Square } from 'chess.js';
+import { attackVoice, blunderVoice, exposedVoice, opportunityVoice, type VoiceId } from './voices';
 
 export const randomColor = (random = Math.random): Color => random() < .5 ? 'w' : 'b';
 
 export interface Rules { castling: boolean; enPassant: boolean }
 export const beginnerRules: Rules = { castling: false, enPassant: false };
-export const names = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
+export const names = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' } as const;
 export const values = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
 export const uci = (move: Move) => move.from + move.to + (move.promotion ?? '');
 
@@ -13,15 +14,15 @@ export function legalMoves(chess: Chess, rules: Rules): Move[] {
     (rules.castling || !/[kq]/.test(m.flags)) && (rules.enPassant || !m.flags.includes('e')));
 }
 
-export function ending(chess: Chess, rules: Rules, humanColor: Color = 'w'): string | undefined {
+export function ending(chess: Chess, rules: Rules, humanColor: Color = 'w'): VoiceId | undefined {
   if (!legalMoves(chess, rules).length) {
     if (chess.isCheck()) return chess.turn() === humanColor
-      ? 'Checkmate! Let’s try again. Every game helps you learn.'
-      : 'Checkmate! You did it, little knight!';
-    return 'A tie! No one has a move. Let’s play again.';
+      ? 'human-checkmated'
+      : 'ai-checkmated';
+    return 'stalemate';
   }
   if (chess.isInsufficientMaterial() || chess.isThreefoldRepetition() || chess.isDrawByFiftyMoves())
-    return 'It’s a tie! That was a good adventure.';
+    return 'draw';
 }
 
 export class Game {
@@ -60,7 +61,7 @@ export class Game {
   }
 }
 
-export interface Danger { from: Square; to: Square; message: string }
+export interface Danger { from: Square; to: Square; voice: VoiceId; exposedVoice?: VoiceId }
 /** A short, legal capture/recapture check, not a full tactical evaluation. */
 export function findDanger(chess: Chess, rules: Rules, played: Move): Danger | undefined {
   if (ending(chess, rules)) return;
@@ -94,8 +95,12 @@ function captureRisk(chess: Chess, rules: Rules, compensation: number, kind: 'bl
   }
   if (!worst) return;
   const m = worst.move;
-  return { from: m.from, to: m.to,
-    message: kind === 'opportunity' ? `I think you can capture this ${names[m.captured!]} for free.`
-      : kind === 'attack' ? `My ${names[m.piece]} can take your ${names[m.captured!]}${worst.canRecapture ? '' : ' for free'}.`
-      : `Careful! I can take your ${names[m.captured!]}.` };
+  const victim = names[m.captured!];
+  if (victim === 'king') throw new Error('A legal move cannot capture the king.');
+  const voice = kind === 'opportunity' ? opportunityVoice[victim]
+    : kind === 'attack' ? attackVoice(names[m.piece], victim, !worst.canRecapture)
+    : blunderVoice[victim];
+  if (!voice) throw new Error(`Missing voice for captured ${victim}`);
+  return { from: m.from, to: m.to, voice,
+    exposedVoice: kind === 'blunder' ? exposedVoice[victim] : undefined };
 }

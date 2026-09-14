@@ -39,16 +39,16 @@ it('links preserve Black, rules, moves, and pending warnings; old links stay Whi
 
 it('warns about White attacks and Black blunders', () => {
   const chess = new Chess('4k3/8/4r3/3P4/8/8/8/4K3 b - - 0 1');
-  expect(findAttack(chess, beginnerRules, 'b')?.message).toBe('My pawn can take your rook for free.');
+  expect(findAttack(chess, beginnerRules, 'b')?.voice).toBe('attack-pawn-rook-free');
   const blunder = new Chess('4k3/4q3/8/8/3P4/8/8/4K3 b - - 0 1');
   const played = blunder.move('Qe5');
-  expect(findDanger(blunder, beginnerRules, played)?.message).toBe('Careful! I can take your queen.');
+  expect(findDanger(blunder, beginnerRules, played)?.voice).toBe('blunder-queen');
 });
 
 it('checkmate wording follows the human color', () => {
   const game = new Game(beginnerRules, 'b');
   game.chess = new Chess('7k/6Q1/5K2/8/8/8/8/8 b - - 0 1');
-  expect(game.over).toContain('try again');
+  expect(game.over).toBe('human-checkmated');
   game.humanColor = 'w';
-  expect(game.over).toContain('You did it');
+  expect(game.over).toBe('ai-checkmated');
 });

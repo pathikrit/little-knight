@@ -16,15 +16,10 @@ Howler 2.2.4 — James Simpson and contributors — MIT
 https://github.com/goldfire/howler.js
 Move sounds are original synthesized waveforms in src/audio.ts (GPL-3.0-or-later).
 
-meSpeak 2.0.2 npm wrapper (meSpeak engine 1.9.6) — Norbert Landsteiner;
-speak.js — Alon Zakai; eSpeak — Jonathan Duddington — GNU GPL
-https://github.com/mikolalysenko/mespeak
-https://www.masswerk.at/mespeak/
-https://github.com/kripken/speak.js
-https://espeak.sourceforge.net/
-The unmodified JavaScript port, config, and US English voice are included in
-source/dependencies/mespeak. eSpeak's upstream C++ source is available at
-https://sourceforge.net/projects/espeak/files/espeak/espeak-1.48/.
+Kokoro 82M / af_heart voice — hexgrad and contributors — Apache-2.0
+https://huggingface.co/hexgrad/Kokoro-82M
+The checked-in coaching recordings were generated locally from the application’s
+own text. The app ships the compressed recordings, not the model or a voice API.
 
 Piece artwork (unmodified SVG source included in ./pieces):
 Classic / cburnett — Colin M. L. Burnett — GPL-2.0-or-later

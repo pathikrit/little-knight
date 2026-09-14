@@ -10,6 +10,7 @@ import { readSettings, saveSettings, type Settings } from './settings';
 import { settingsPanel } from './settings-panel';
 import { boards } from './visuals.json';
 import { playSound, speak, stopSpeech, warmAudio } from './audio';
+import { voiceText, type VoiceId } from './voices';
 import { icon } from './icons';
 import type { Request, Reply } from './engine/worker';
 import '@lichess-org/chessground/assets/chessground.base.css';
@@ -23,7 +24,7 @@ let danger: Danger | undefined;
 let attack: Danger | undefined;
 let opportunity: Danger | undefined;
 let selected: Square | undefined;
-let message = location.hash && !restored ? 'That game link could not be opened.' : '';
+let message: VoiceId[] = location.hash && !restored ? ['invalid-game-link'] : [];
 let revision = 0;
 let replyTimer: ReturnType<typeof setTimeout> | undefined;
 let worker: Worker | undefined;
@@ -95,21 +96,29 @@ function restoredDanger(): Danger | undefined {
   const lastHuman = moves.reverse().find(move => move.color === game.humanColor);
   return lastHuman ? findDanger(new Chess(lastHuman.after), game.rules, lastHuman) : undefined;
 }
-function warningText() {
-  return danger ? (game.humanTurn ? danger.message.replace('Careful! I can take', 'That move exposed') : danger.message)
-    : hintText();
+function warningMessage(): VoiceId[] {
+  return danger ? [game.humanTurn ? danger.exposedVoice ?? danger.voice : danger.voice] : hintMessage();
 }
-function hintText() { return [attack?.message, opportunity?.message].filter(Boolean).join(' '); }
-function positionMessage(fallback = '') {
-  if (danger) return warningText();
-  return game.over ?? (game.chess.isCheck() && game.humanTurn ? 'Your king is in check.' : hintText() || fallback);
+function hintMessage(): VoiceId[] {
+  return [attack?.voice, opportunity?.voice].filter((id): id is VoiceId => !!id);
 }
-function displayedMessage() { return message || (game.humanTurn && !game.over ? 'Your turn' : ''); }
+function positionMessage(fallback: readonly VoiceId[] = []): VoiceId[] {
+  if (danger) return warningMessage();
+  if (game.over) return [game.over];
+  if (game.chess.isCheck() && game.humanTurn) return ['king-in-check'];
+  const hints = hintMessage();
+  return hints.length ? hints : [...fallback];
+}
+function displayedMessage(): VoiceId[] { return message.length ? message : game.humanTurn && !game.over ? ['your-turn'] : []; }
 function refreshPositionHints() {
   attack = settings.blunders ? findAttack(game.chess, game.rules, game.humanColor) : undefined;
   opportunity = settings.blunders ? findFreeCapture(game.chess, game.rules, game.humanColor) : undefined;
 }
-function tell(text: string, aloud = false, queue = false) { message = text; render(); if (aloud && settings.blunders) void speak(text, queue); }
+function tell(next?: VoiceId | readonly VoiceId[], aloud = false, queue = false) {
+  message = !next ? [] : typeof next === 'string' ? [next] : [...next];
+  render();
+  if (aloud && settings.blunders && message.length) void speak(message, queue);
+}
 function cancelEngine() {
   revision++; clearTimeout(replyTimer); queuedReply = undefined;
   worker?.postMessage({ type: 'stop', id: revision, fen: game.chess.fen(), rules: game.rules, elo: settings.elo } satisfies Request);
@@ -148,7 +157,7 @@ function computerMove(move: string) {
   const text = positionMessage(message);
   // The blunder was already spoken immediately after the human move.
   // Do not queue a lower-priority tip behind it when the AI replies.
-  const announce = !danger && !!(game.over || game.chess.isCheck() || hintText());
+  const announce = !danger && !!(game.over || game.chess.isCheck() || hintMessage().length);
   tell(text, announce, true); persist(); syncEngine();
 }
 function humanMove(from: Key, to: Key) {
@@ -170,14 +179,14 @@ function commitHuman(move: string) {
   playSound(settings.sound);
   const risk = findDanger(game.chess, game.rules, played);
   danger = settings.blunders ? risk : undefined; attack = undefined; opportunity = undefined;
-  tell(game.over ?? danger?.message ?? (risk ? '' : 'Good move!'), !!game.over || !!danger || !risk);
+  tell(game.over ?? danger?.voice ?? (risk ? undefined : 'good-move'), !!game.over || !!danger || !risk);
   persist(); syncEngine();
 }
 function undo() {
   cancelEngine(); cancelMotion(); stopSpeech(); danger = undefined; attack = undefined; selected = undefined;
   game.undo();
   opportunity = settings.blunders ? findFreeCapture(game.chess, game.rules, game.humanColor) : undefined;
-  tell(opportunity?.message ?? ''); persist(); syncEngine();
+  tell(opportunity?.voice); persist(); syncEngine();
 }
 function freshGame(color: Color = game.humanColor) {
   cancelEngine(); cancelMotion(); stopSpeech(); danger = undefined; attack = undefined; selected = undefined;
@@ -185,13 +194,14 @@ function freshGame(color: Color = game.humanColor) {
   opportunity = undefined;
   keyboardSquare = color === 'w' ? 'e2' : 'e7';
   board.selectSquare(null); board.set({ highlight: { custom: new Map() } });
-  tell(''); persist(); syncEngine();
+  tell(); persist(); syncEngine();
 }
 
 function renderHints() {
   const piece = selected ? game.chess.get(selected) : undefined;
   const destinations = selected && game.humanTurn ? game.destinations().get(selected) ?? [] : [];
-  const text = displayedMessage();
+  const ids = displayedMessage();
+  const text = voiceText(ids);
   $('#coach-message').textContent = text;
   $('#coach').hidden = !text;
   $<HTMLButtonElement>('#coach').disabled = !settings.blunders || !text;
@@ -257,7 +267,7 @@ function showSettings() {
     saveSettings(settings); applyAppearance();
     if (!settings.blunders && (danger || attack || opportunity)) {
       danger = undefined; attack = undefined; opportunity = undefined;
-      message = game.over ?? (game.chess.isCheck() && game.humanTurn ? 'Your king is in check.' : '');
+      message = game.over ? [game.over] : game.chess.isCheck() && game.humanTurn ? ['king-in-check'] : [];
     } else if (settings.blunders && !buddyWasEnabled) {
       danger = restoredDanger(); refreshPositionHints();
       message = positionMessage();
@@ -269,9 +279,9 @@ function showSettings() {
 
 $('#settings-button').addEventListener('click', showSettings);
 $('#coach').addEventListener('click', () => {
-  const text = displayedMessage();
-  if (!text || !settings.blunders || paused()) return;
-  warmAudio(); void speak(text);
+  const ids = displayedMessage();
+  if (!ids.length || !settings.blunders || paused()) return;
+  warmAudio(); void speak(ids);
 });
 $('#undo').addEventListener('click', undo);
 $('#new-game').addEventListener('click', () => {
@@ -307,7 +317,7 @@ matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', event 
 window.addEventListener('hashchange', () => {
   cancelEngine(); cancelMotion(); stopSpeech();
   const state = fromHash(location.hash);
-  if (!state) { tell('That game link could not be opened. Your current game is still here.'); syncEngine(); return; }
+  if (!state) { tell('invalid-game-link-current'); syncEngine(); return; }
   game = state.game; danger = restoredDanger(); refreshPositionHints();
   keyboardSquare = game.humanColor === 'w' ? 'e2' : 'e7';
   selected = undefined; board.selectSquare(null);

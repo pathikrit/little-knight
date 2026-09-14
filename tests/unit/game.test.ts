@@ -25,8 +25,8 @@ describe('simplified rules', () => {
     expect(game.destinations().get('e1')).not.toContain('e2');
   });
   it('detects checkmate and stalemate', () => {
-    expect(ending(new Chess('7k/6Q1/5K2/8/8/8/8/8 b - - 0 1'), beginnerRules)).toContain('Checkmate');
-    expect(ending(new Chess('7k/5Q2/5K2/8/8/8/8/8 b - - 0 1'), beginnerRules)).toContain('tie');
+    expect(ending(new Chess('7k/6Q1/5K2/8/8/8/8/8 b - - 0 1'), beginnerRules)).toBe('ai-checkmated');
+    expect(ending(new Chess('7k/5Q2/5K2/8/8/8/8/8 b - - 0 1'), beginnerRules)).toBe('stalemate');
   });
 });
 
@@ -71,7 +71,7 @@ describe('kind safety checks', () => {
   it('warns about a hanging moved piece and preserves the position', () => {
     const chess = new Chess('4k3/8/8/3p4/8/8/4Q3/4K3 w - - 0 1');
     const move = chess.move('Qe4'), before = chess.fen();
-    expect(findDanger(chess, beginnerRules, move)?.message).toContain('I can take your queen');
+    expect(findDanger(chess, beginnerRules, move)?.voice).toBe('blunder-queen');
     expect(chess.fen()).toBe(before);
     expect(chess.history()).toEqual(['Qe4+']);
   });
@@ -101,7 +101,7 @@ describe('AI threats and board mat', () => {
   it('announces an uncompensated rook threat without changing the game', () => {
     const chess = new Chess('4k3/8/8/3p4/4R3/8/8/4K3 w - - 0 1');
     const before = chess.fen();
-    expect(findAttack(chess, beginnerRules)?.message).toBe('My pawn can take your rook for free.');
+    expect(findAttack(chess, beginnerRules)?.voice).toBe('attack-pawn-rook-free');
     expect(chess.fen()).toBe(before);
   });
   it('does not announce a fair trade, check, or a pinned attacker', () => {
@@ -111,11 +111,11 @@ describe('AI threats and board mat', () => {
   });
   it('names the attacking queen and the free bishop', () => {
     const chess = new Chess('2q4k/8/8/8/2B5/8/8/7K w - - 0 1');
-    expect(findAttack(chess, beginnerRules)?.message).toBe('My queen can take your bishop for free.');
+    expect(findAttack(chess, beginnerRules)?.voice).toBe('attack-queen-bishop-free');
   });
   it('does not call a profitable capture free when the attacker can be recaptured', () => {
     const chess = new Chess('4k3/8/8/3p4/4R3/5P2/8/4K3 w - - 0 1');
-    expect(findAttack(chess, beginnerRules)?.message).toBe('My pawn can take your rook.');
+    expect(findAttack(chess, beginnerRules)?.voice).toBe('attack-pawn-rook');
   });
   it('counts real captures, including en passant, without counting promotion as a lost pawn', () => {
     const chess = new Chess('4k3/P7/8/3pP3/8/8/8/4K3 w - d6 0 1');

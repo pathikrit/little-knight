@@ -27,7 +27,7 @@ async function trackSpeech(page: Page) {
   });
 }
 
-test('Start Over as Black flips the board, AI opens, and takebacks preserve its opening', async ({ page }) => {
+test('Start Over as Black flips the board, AI opens, and takebacks preserve its opening', { tag: '@cross-browser' }, async ({ page }) => {
   await page.goto('/' + gameHash(new Game()));
   await page.getByRole('button', { name: 'Start Over', exact: true }).click();
   await page.getByRole('radio', { name: 'Black', exact: true }).click();
@@ -125,7 +125,7 @@ test('Black gets blunder warnings, bouncing takebacks, and AI attack hints', asy
   await expect(page.locator('#undo')).not.toHaveClass(/blunder-bounce/);
 });
 
-test('initial board is simple, responsive, and shows knight L arrows', async ({ page }) => {
+test('initial board is simple, responsive, and shows knight L arrows', { tag: '@cross-browser' }, async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/' + gameHash(new Game()));
@@ -185,7 +185,7 @@ test('knight left and right moves have separate L paths, including a third horiz
   await page.screenshot({ path: `test-results/knight-lanes-${test.info().project.name}.png`, fullPage: true });
 });
 
-test('settings persist, dots replace arrows, and appearance does not reset the game', async ({ page }) => {
+test('settings persist, dots replace arrows, and appearance does not reset the game', { tag: '@cross-browser' }, async ({ page }) => {
   await page.goto('/' + gameHash(new Game()));
   await square(page, 'e2'); await square(page, 'e4');
   await expect.poll(() => state(page)?.game.indices.length).toBe(2);

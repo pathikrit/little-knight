@@ -49,17 +49,42 @@ test('pieces move slowly along the knight L, with the AI animation following the
   await expect(page.locator('#motion-layer')).toBeEmpty();
 });
 
-test('the AI waits for coaching audio, including a replay, before moving', async ({ page }) => {
+test('the AI waits for coaching audio, including a replay, before moving', { tag: '@cross-browser' }, async ({ page }) => {
   await page.addInitScript(() => {
-    const tracked = window as typeof window & { coachingAudio: { starts: number; ends: number } };
-    tracked.coachingAudio = { starts: 0, ends: 0 };
+    const tracked = window as typeof window & {
+      coachingAudio: { starts: number; held: number };
+      releaseCoachingAudio(): void;
+    };
+    tracked.coachingAudio = { starts: 0, held: 0 };
+    let holdSpeechTimer = false, fakeTimer = 1000000;
+    const held = new Map<number, () => void>();
     const start = AudioBufferSourceNode.prototype.start;
     AudioBufferSourceNode.prototype.start = function (...args) {
       if ((this.buffer?.duration ?? 0) > 1) {
         tracked.coachingAudio.starts++;
-        this.addEventListener('ended', () => { tracked.coachingAudio.ends++; });
+        holdSpeechTimer = true;
       }
       return start.apply(this, args);
+    };
+    const setTimeout = window.setTimeout.bind(window), clearTimeout = window.clearTimeout.bind(window);
+    window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (holdSpeechTimer && (timeout ?? 0) > 1000) {
+        holdSpeechTimer = false;
+        const id = fakeTimer++;
+        held.set(id, () => { if (typeof handler === 'function') handler(...args); });
+        tracked.coachingAudio.held = held.size;
+        return id;
+      }
+      return setTimeout(handler, timeout, ...args);
+    }) as typeof window.setTimeout;
+    window.clearTimeout = ((id?: number) => {
+      if (id !== undefined && held.delete(id)) tracked.coachingAudio.held = held.size;
+      else clearTimeout(id);
+    }) as typeof window.clearTimeout;
+    tracked.releaseCoachingAudio = () => {
+      const entry = [...held.entries()].at(-1);
+      if (!entry) return;
+      held.delete(entry[0]); tracked.coachingAudio.held = held.size; entry[1]();
     };
   });
   const game = new Game();
@@ -70,15 +95,15 @@ test('the AI waits for coaching audio, including a replay, before moving', async
   await expect(mover).toHaveClass(/white queen/);
   await expect(page.locator('#coach-message')).toHaveText('Careful! I can take your queen.');
   const audio = () => page.evaluate(() =>
-    (window as typeof window & { coachingAudio: { starts: number; ends: number } }).coachingAudio);
+    (window as typeof window & { coachingAudio: { starts: number; held: number } }).coachingAudio);
   await expect.poll(async () => (await audio()).starts).toBe(1);
   await page.getByRole('button', { name: 'Repeat message', exact: true }).click();
   await expect.poll(async () => (await audio()).starts).toBe(2);
+  await expect.poll(async () => (await audio()).held).toBe(1);
   await mover.evaluate(piece => piece.getAnimations()[0].finish());
   expect(state(page).game.indices.length).toBe(5);
-  expect((await audio()).ends).toBeLessThan(2);
+  await page.evaluate(() => (window as typeof window & { releaseCoachingAudio(): void }).releaseCoachingAudio());
   await expect.poll(() => state(page).game.indices.length, { timeout: 10000 }).toBe(6);
-  expect((await audio()).ends).toBe(2);
 });
 
 test('Take Back reverses an in-flight human move at the shorter undo speed', async ({ page }) => {
@@ -96,7 +121,7 @@ test('Take Back reverses an in-flight human move at the shorter undo speed', asy
   await expect(page.locator('cg-board piece:not(.ghost)')).toHaveCount(32);
 });
 
-test('Take Back walks the AI move back before the human move', async ({ page }) => {
+test('Take Back walks the AI move back before the human move', { tag: '@cross-browser' }, async ({ page }) => {
   await setup(page); await knightMove(page);
   const mover = page.locator('#motion-layer .moving-piece');
   await expect(mover).toHaveClass(/black knight/);

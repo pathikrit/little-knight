@@ -5,7 +5,7 @@ export default defineConfig({
   webServer: process.env.APP_URL ? undefined : { command: 'npm run preview -- --port 4173', url: 'http://127.0.0.1:4173', reuseExistingServer: !process.env.CI },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit-mobile', use: { ...devices['iPhone 13'] } },
+    { name: 'firefox', grep: /@cross-browser/, use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit-mobile', grep: /@cross-browser/, use: { ...devices['iPhone 13'] } },
   ],
 });

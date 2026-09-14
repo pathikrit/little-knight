@@ -134,10 +134,13 @@ test('initial board is simple, responsive, and shows knight L arrows', async ({ 
   await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark');
   await expect(page.locator('html')).toHaveCSS('background-color', 'rgb(37, 37, 37)');
   await expect(page.locator('cg-board')).toHaveCSS('background-image', /boards\/wood.jpg/);
-  expect(await page.locator('cg-board').evaluate(async el => {
+  await expect.poll(() => page.locator('cg-board').evaluate(async el => {
+    // ResizeObserver may replace this element between locating it and reading its style.
+    const url = /^url\(["']?(.*?)["']?\)$/.exec(getComputedStyle(el).backgroundImage)?.[1];
+    if (!el.isConnected || !url) return 0;
     const texture = new Image();
-    texture.src = getComputedStyle(el).backgroundImage.slice(5, -2);
-    await texture.decode();
+    texture.src = url;
+    await texture.decode().catch(() => {});
     return texture.naturalWidth;
   })).toBe(1024);
   await expect(page.locator('cg-board piece.white.knight').first()).toHaveCSS('background-image', /pieces\/cburnett\/wN.svg/);

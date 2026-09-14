@@ -4,7 +4,7 @@ import { Chess, type Color, type Square, type Move } from 'chess.js';
 import { Game, randomColor, findDanger, findAttack, findFreeCapture, legalMoves, names, uci, type Danger } from './game';
 import { renderMat } from './mat';
 import { arrowTipOffset, moveArrowPath } from './arrows';
-import { animateMove, type MoveMotion } from './motion';
+import { animateMove, undoDuration, type MoveMotion } from './motion';
 import { gameHash, fromHash } from './share';
 import { readSettings, saveSettings, type Settings } from './settings';
 import { settingsPanel } from './settings-panel';
@@ -31,6 +31,10 @@ let worker: Worker | undefined;
 let promotion: { from: Key; to: Key } | undefined;
 let motion: MoveMotion | undefined;
 let queuedReply: string | undefined;
+let coaching = false;
+let coachToken = 0;
+let undoing = false;
+let undoQueue: Move[] = [];
 // Absolute URLs also resolve correctly when a CSS variable is consumed by a bundled stylesheet.
 const asset = (path: string) => new URL(path, new URL(import.meta.env.BASE_URL, document.baseURI)).href;
 
@@ -79,15 +83,25 @@ const board = Chessground($('#board'), {
 });
 
 function paused() { return !!document.querySelector('dialog[open]') || document.hidden; }
-function cancelMotion() { motion?.cancel(); motion = undefined; queuedReply = undefined; }
-function startMotion(move: Move) {
+function cancelMotion() {
+  motion?.cancel(); motion = undefined; queuedReply = undefined;
+  undoQueue = []; undoing = false;
+}
+function cancelCoach() { coachToken++; coaching = false; stopSpeech(); }
+function releaseReply() {
+  if (motion || coaching || paused()) return;
+  const reply = queuedReply; queuedReply = undefined;
+  if (reply && !game.humanTurn) computerMove(reply);
+  else syncEngine();
+}
+function startMotion(move: Move, reverse = false) {
   motion = animateMove(move, game.humanColor === 'b', $('#motion-layer'), () => {
     motion = undefined;
-    const reply = queuedReply; queuedReply = undefined;
     render();
-    if (reply && !paused() && !game.humanTurn) computerMove(reply);
-    else syncEngine();
-  });
+    if (reverse) playNextUndo();
+    else releaseReply();
+  }, reverse ? { reverse: true, duration: undoDuration } : undefined);
+  return !!motion;
 }
 function persist() { history.replaceState(null, '', location.pathname + location.search + gameHash(game)); }
 function restoredDanger(): Danger | undefined {
@@ -114,10 +128,10 @@ function refreshPositionHints() {
   attack = settings.blunders ? findAttack(game.chess, game.rules, game.humanColor) : undefined;
   opportunity = settings.blunders ? findFreeCapture(game.chess, game.rules, game.humanColor) : undefined;
 }
-function tell(next?: VoiceId | readonly VoiceId[], aloud = false, queue = false) {
+function tell(next?: VoiceId | readonly VoiceId[], aloud = false, queue = false): Promise<void> | undefined {
   message = !next ? [] : typeof next === 'string' ? [next] : [...next];
   render();
-  if (aloud && settings.blunders && message.length) void speak(message, queue);
+  if (aloud && settings.blunders && message.length) return speak(message, queue);
 }
 function cancelEngine() {
   revision++; clearTimeout(replyTimer); queuedReply = undefined;
@@ -149,7 +163,7 @@ try {
 
 function computerMove(move: string) {
   clearTimeout(replyTimer);
-  if (motion) { queuedReply = move; return; }
+  if (motion || coaching) { queuedReply = move; return; }
   const played = game.play(move); selected = undefined;
   startMotion(played);
   playSound(settings.sound);
@@ -173,23 +187,40 @@ function humanMove(from: Key, to: Key) {
   commitHuman(uci(options[0]));
 }
 function commitHuman(move: string) {
-  cancelEngine(); stopSpeech(); selected = undefined;
+  cancelEngine(); cancelCoach(); selected = undefined;
   const played = game.play(move);
   startMotion(played);
   playSound(settings.sound);
   const risk = findDanger(game.chess, game.rules, played);
   danger = settings.blunders ? risk : undefined; attack = undefined; opportunity = undefined;
-  tell(game.over ?? danger?.voice ?? (risk ? undefined : 'good-move'), !!game.over || !!danger || !risk);
+  const next = game.over ?? danger?.voice ?? (risk ? undefined : 'good-move');
+  const announce = !!game.over || !!danger || !risk;
+  const token = ++coachToken;
+  coaching = announce && settings.blunders && !!next;
+  const playback = tell(next, announce);
+  if (playback) void playback.finally(() => {
+    if (token !== coachToken) return;
+    coaching = false; releaseReply();
+  });
   persist(); syncEngine();
 }
 function undo() {
-  cancelEngine(); cancelMotion(); stopSpeech(); danger = undefined; attack = undefined; selected = undefined;
-  game.undo();
+  cancelEngine(); cancelMotion(); cancelCoach(); danger = undefined; attack = undefined; selected = undefined;
+  undoQueue = game.undo();
   opportunity = settings.blunders ? findFreeCapture(game.chess, game.rules, game.humanColor) : undefined;
-  tell(opportunity?.voice); persist(); syncEngine();
+  message = opportunity ? [opportunity.voice] : [];
+  persist();
+  if (undoQueue.length) { undoing = true; playNextUndo(); }
+  else { render(); syncEngine(); }
+}
+function playNextUndo() {
+  const move = undoQueue.shift();
+  if (!move) { undoing = false; render(); syncEngine(); return; }
+  if (startMotion(move, true)) render();
+  else playNextUndo();
 }
 function freshGame(color: Color = game.humanColor) {
-  cancelEngine(); cancelMotion(); stopSpeech(); danger = undefined; attack = undefined; selected = undefined;
+  cancelEngine(); cancelMotion(); cancelCoach(); danger = undefined; attack = undefined; selected = undefined;
   game = new Game({ castling: settings.castling, enPassant: settings.enPassant }, color);
   opportunity = undefined;
   keyboardSquare = color === 'w' ? 'e2' : 'e7';
@@ -237,7 +268,7 @@ function render() {
   $('#board').dataset.animating = String(!!motion);
   $('#board').setAttribute('aria-busy', String(!!motion));
   $('#board').setAttribute('aria-label', `Chessboard. You play ${game.humanName}. Use arrow keys to explore, then Enter to select a piece and destination.`);
-  $<HTMLButtonElement>('#undo').disabled = !game.canUndo;
+  $<HTMLButtonElement>('#undo').disabled = !game.canUndo || undoing;
   $('#undo').classList.toggle('blunder-bounce', settings.blunders && !!danger);
   $('#coach').classList.toggle('careful', !!danger || !!attack);
   renderMat($('.board-layout'), game);
@@ -245,7 +276,7 @@ function render() {
 }
 
 function showSettings() {
-  cancelEngine(); cancelMotion(); stopSpeech();
+  cancelEngine(); cancelMotion(); cancelCoach();
   $('#settings-dialog').innerHTML = settingsPanel(settings, game.rules, asset);
   $<HTMLDialogElement>('#settings-dialog').showModal(); render();
   $('#settings-form').addEventListener('change', event => {
@@ -281,11 +312,19 @@ $('#settings-button').addEventListener('click', showSettings);
 $('#coach').addEventListener('click', () => {
   const ids = displayedMessage();
   if (!ids.length || !settings.blunders || paused()) return;
-  warmAudio(); void speak(ids);
+  warmAudio();
+  const gateReply = !game.humanTurn && !game.over;
+  const token = ++coachToken;
+  coaching = gateReply;
+  const playback = speak(ids);
+  if (gateReply) void playback.finally(() => {
+    if (token !== coachToken) return;
+    coaching = false; releaseReply();
+  });
 });
 $('#undo').addEventListener('click', undo);
 $('#new-game').addEventListener('click', () => {
-  cancelEngine(); cancelMotion(); stopSpeech();
+  cancelEngine(); cancelMotion(); cancelCoach();
   ($('wa-radio-group[name="side"]') as HTMLElement & { value: string }).value = 'random';
   $<HTMLDialogElement>('#start-dialog').showModal(); render();
 });
@@ -308,14 +347,14 @@ document.addEventListener('click', event => {
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { promotion = undefined; render(); syncEngine(); });
 document.addEventListener('pointerdown', warmAudio, { once: true });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { cancelMotion(); stopSpeech(); render(); }
+  if (document.hidden) { cancelMotion(); cancelCoach(); render(); }
   syncEngine();
 });
 matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', event => {
   if (event.matches) { cancelMotion(); render(); syncEngine(); }
 });
 window.addEventListener('hashchange', () => {
-  cancelEngine(); cancelMotion(); stopSpeech();
+  cancelEngine(); cancelMotion(); cancelCoach();
   const state = fromHash(location.hash);
   if (!state) { tell('invalid-game-link-current'); syncEngine(); return; }
   game = state.game; danger = restoredDanger(); refreshPositionHints();

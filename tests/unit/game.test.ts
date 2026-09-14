@@ -33,7 +33,8 @@ describe('simplified rules', () => {
 describe('takebacks and URL replay', () => {
   it('undoes a complete turn, then allows branching', () => {
     const game = new Game();
-    game.play('e2e4'); game.play('e7e5'); game.undo();
+    game.play('e2e4'); game.play('e7e5');
+    expect(game.undo().map(uci)).toEqual(['e7e5', 'e2e4']);
     expect(game.chess.fen()).toBe(new Chess().fen());
     expect(game.indices).toEqual([]);
     game.play('d2d4');

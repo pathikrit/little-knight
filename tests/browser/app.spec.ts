@@ -318,6 +318,9 @@ test('a pawn can promote to a chosen piece', async ({ page }) => {
 
 test('a failed engine worker produces a legal fallback at 650ms', async ({ page }) => {
   // Test the response deadline independently of animation and shared-runner CPU load.
+  await page.addInitScript(() => {
+    localStorage.setItem('little-knight-settings', JSON.stringify({ blunders: false }));
+  });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.route('**/assets/worker-*.js', route => route.abort());

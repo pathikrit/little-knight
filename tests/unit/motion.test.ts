@@ -1,13 +1,24 @@
 import { expect, it } from 'vitest';
 import { Chess } from 'chess.js';
-import { motionPlan, moveDuration, moveRoute } from '../../src/motion';
+import { motionPlan, moveDuration, moveRoute, undoDuration } from '../../src/motion';
 
 it('uses a readable duration and separate two-then-one knight legs', () => {
   expect(moveDuration).toBe(800);
+  expect(undoDuration).toBe(400);
   expect(moveRoute('g1', 'f3', true, false)).toEqual([[6, 7], [6, 5], [5, 5]]);
   expect(moveRoute('g1', 'e2', true, false)).toEqual([[6, 7], [4, 7], [4, 6]]);
   expect(moveRoute('b8', 'c6', true, true)).toEqual([[6, 7], [6, 5], [5, 5]]);
   expect(moveRoute('e2', 'e4', false, false)).toEqual([[4, 6], [4, 4]]);
+});
+
+it('reverses move routes for a quicker animated takeback', () => {
+  const chess = new Chess();
+  const knight = chess.move('Nf3');
+  expect(motionPlan(knight, false, true).pieces).toEqual([
+    { role: 'knight', route: [[5, 5], [6, 5], [6, 7]] },
+  ]);
+  const promotion = new Chess('4k3/6P1/8/8/8/8/8/4K3 w - - 0 1').move('g8=Q');
+  expect(motionPlan(promotion, false, true).pieces[0]).toEqual({ role: 'queen', route: [[6, 0], [6, 1]] });
 });
 
 it('keeps captured pieces visible until landing, without duplicating the mover', () => {

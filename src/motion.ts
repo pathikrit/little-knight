@@ -2,6 +2,7 @@ import { Chess, type Move, type Square } from 'chess.js';
 import { names } from './game';
 
 export const moveDuration = 800;
+export const undoDuration = 400;
 type Point = [number, number];
 export function moveRoute(from: Square, to: Square, knight: boolean, flipped: boolean): Point[] {
   const point = (square: Square): Point => {
@@ -15,25 +16,31 @@ export function moveRoute(from: Square, to: Square, knight: boolean, flipped: bo
   return [start, corner, end];
 }
 
-export function motionPlan(move: Move, flipped: boolean) {
+export function motionPlan(move: Move, flipped: boolean, reverse = false) {
   const chess = new Chess(move.before);
   chess.remove(move.from);
-  const pieces = [{ role: names[move.piece], route: moveRoute(move.from, move.to, move.piece === 'n', flipped) }];
+  const route = (from: Square, to: Square, knight: boolean) => {
+    const points = moveRoute(from, to, knight, flipped);
+    return reverse ? points.reverse() : points;
+  };
+  const pieces = [{ role: names[reverse && move.promotion ? move.promotion : move.piece],
+    route: route(move.from, move.to, move.piece === 'n') }];
   if (/[kq]/.test(move.flags)) {
     const rank = move.color === 'w' ? '1' : '8';
     const from = `${move.flags.includes('k') ? 'h' : 'a'}${rank}` as Square;
     const to = `${move.flags.includes('k') ? 'f' : 'd'}${rank}` as Square;
     chess.remove(from);
-    pieces.push({ role: 'rook', route: moveRoute(from, to, false, flipped) });
+    pieces.push({ role: 'rook', route: route(from, to, false) });
   }
-  // The captured piece remains visible until the mover lands. Promotions travel as pawns.
+  // The captured piece remains visible until the mover lands. Forward promotions travel as pawns.
   return { fen: chess.fen(), pieces, color: move.color === 'w' ? 'white' : 'black' };
 }
 
 export interface MoveMotion { fen: string; cancel(): void }
-export function animateMove(move: Move, flipped: boolean, layer: HTMLElement, done: () => void): MoveMotion | undefined {
+export function animateMove(move: Move, flipped: boolean, layer: HTMLElement, done: () => void,
+  options: { reverse?: boolean; duration?: number } = {}): MoveMotion | undefined {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const plan = motionPlan(move, flipped);
+  const plan = motionPlan(move, flipped, options.reverse);
   const animations: Animation[] = [];
   let cancelled = false;
   layer.innerHTML = `<svg class="motion-track" viewBox="0 0 800 800" aria-hidden="true">${plan.pieces.map(piece =>
@@ -46,7 +53,7 @@ export function animateMove(move: Move, flipped: boolean, layer: HTMLElement, do
       transform: `translate(${x * 100}%, ${y * 100}%)`,
       offset: piece.route.length === 3 ? [0, 2 / 3, 1][index] : index,
     }));
-    animations.push(element.animate(frames, { duration: moveDuration, easing: 'linear', fill: 'both' }));
+    animations.push(element.animate(frames, { duration: options.duration ?? moveDuration, easing: 'linear', fill: 'both' }));
   }
   const cancel = () => {
     cancelled = true;

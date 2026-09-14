@@ -45,10 +45,13 @@ export class Game {
   }
   undo() {
     const lastHuman = this.moves.map(move => move.color).lastIndexOf(this.humanColor);
-    if (lastHuman < 0) return;
+    const undone: Move[] = [];
+    if (lastHuman < 0) return undone;
     while (this.indices.length > lastHuman) {
-      this.chess.undo(); this.indices.pop();
+      const move = this.chess.undo(); this.indices.pop();
+      if (move) undone.push(move);
     }
+    return undone;
   }
   destinations(): Map<Square, Square[]> {
     const result = new Map<Square, Square[]>();

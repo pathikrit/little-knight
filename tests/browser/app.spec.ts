@@ -32,7 +32,7 @@ test('Start Over as Black flips the board, AI opens, and takebacks preserve its 
   await page.getByRole('button', { name: 'Start Over', exact: true }).click();
   await page.getByRole('radio', { name: 'Black', exact: true }).click();
   await page.getByRole('button', { name: 'Play', exact: true }).click();
-  await expect.poll(() => state(page)?.game.indices.length, { timeout: 1000 }).toBe(1);
+  await expect.poll(() => state(page)?.game.indices.length).toBe(1);
   expect(state(page)?.game.humanColor).toBe('b');
   await expect(page.locator('#board')).toHaveClass(/orientation-black/);
   await expect(page.locator('#board')).toHaveAttribute('aria-label', /You play black/);
@@ -48,9 +48,12 @@ test('Start Over as Black flips the board, AI opens, and takebacks preserve its 
   await page.reload();
   await expect(page.locator('#board')).toHaveClass(/orientation-black/);
   await expect(page.locator('#undo')).toBeDisabled();
-  const firstFile = (await page.locator('coords.files coord').first().boundingBox())!;
-  const lastFile = (await page.locator('coords.files coord').last().boundingBox())!;
-  expect(firstFile.x).toBeGreaterThan(lastFile.x);
+  // Chessground redraws coordinates after ResizeObserver; reload may precede that frame.
+  await expect.poll(async () => {
+    const firstFile = await page.locator('coords.files coord').first().boundingBox();
+    const lastFile = await page.locator('coords.files coord').last().boundingBox();
+    return !!firstFile && !!lastFile && firstFile.x > lastFile.x;
+  }).toBe(true);
   await page.getByRole('button', { name: 'Start Over', exact: true }).click();
   await expect(page.getByRole('radio', { name: 'Random', exact: true })).toBeChecked();
   await page.screenshot({ path: `test-results/start-over-${test.info().project.name}.png`, fullPage: true });
@@ -151,26 +154,11 @@ test('initial board is simple, responsive, and shows knight L arrows', async ({ 
   await page.screenshot({ path: `test-results/board-${test.info().project.name}.png`, fullPage: true });
 });
 
-test('AI replies within one second and takeback removes both moves', async ({ page }) => {
+test('AI replies and takeback removes both moves', async ({ page }) => {
   await page.goto('/' + gameHash(new Game()));
   await square(page, 'e2');
-  // Measure from the actual input, excluding Playwright's pre-click stability waits.
-  await page.evaluate(() => {
-    const board = document.querySelector('#board')!;
-    board.addEventListener('pointerdown', () => {
-      const start = performance.now();
-      const observer = new MutationObserver(() => {
-        if (!document.querySelector('#motion-layer .black.moving-piece')) return;
-        board.setAttribute('data-reply-ms', String(performance.now() - start));
-        observer.disconnect();
-      });
-      observer.observe(document.querySelector('#motion-layer')!, { childList: true });
-    }, { once: true });
-  });
   await square(page, 'e4');
-  await expect.poll(() => state(page)?.game.indices.length, { timeout: 1000, intervals: [20, 40] }).toBe(2);
-  expect(Number(await page.locator('#board').getAttribute('data-reply-ms'))).toBeGreaterThan(0);
-  expect(Number(await page.locator('#board').getAttribute('data-reply-ms'))).toBeLessThan(1000);
+  await expect.poll(() => state(page)?.game.indices.length).toBe(2);
   await expect(page.locator('#coach-message')).toHaveText(/^(Good move!|My (pawn|knight) can take your pawn for free\.|I think you can capture this pawn for free\.)/);
   await expect(page.locator('#undo')).not.toHaveClass(/blunder-bounce/);
   await page.getByRole('button', { name: 'Take Back' }).click();
@@ -325,11 +313,20 @@ test('a pawn can promote to a chosen piece', async ({ page }) => {
   await expect.poll(() => state(page)?.game.moves[8]?.promotion).toBe('n');
 });
 
-test('a failed engine worker still produces a legal reply', async ({ page }) => {
+test('a failed engine worker produces a legal fallback at 650ms', async ({ page }) => {
+  // Test the response deadline independently of animation and shared-runner CPU load.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.route('**/assets/worker-*.js', route => route.abort());
   await page.goto('/' + gameHash(new Game()));
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   await square(page, 'e2'); await square(page, 'e4');
-  await expect.poll(() => state(page)?.game.indices.length, { timeout: 1800, intervals: [50] }).toBe(2);
+  await page.clock.runFor(1); // Chessground dispatches the move callback after 1ms.
+  expect(state(page)?.game.indices.length).toBe(1);
+  await page.clock.runFor(649);
+  expect(state(page)?.game.indices.length).toBe(1);
+  await page.clock.runFor(1);
+  await expect.poll(() => state(page)?.game.indices.length).toBe(2);
 });
 
 for (const blunders of [true, false]) test(`Blunder Buddy controls speech, enabled=${blunders}, ignoring the old Voice setting`, async ({ page }) => {

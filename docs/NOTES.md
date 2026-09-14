@@ -17,6 +17,8 @@ npm run test:browser
 
 Install browser test binaries once with `npx playwright install chromium firefox webkit`.
 
+Linux CI starts PulseAudio with a virtual output device so Firefox can exercise real audio playback. The engine fallback deadline is checked with [Playwright's controlled clock](https://playwright.dev/docs/clock), separately from animation and real-worker integration tests; shared-runner wall time is not a reliable performance assertion. Layout checks wait for Chessground's asynchronous redraw after reload.
+
 ## What’s included
 
 - Chessground board, chess.js legal moves, tap or drag, and a keyboard board (arrows to explore; Enter to select a piece or destination).
